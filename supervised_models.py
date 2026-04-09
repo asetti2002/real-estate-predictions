@@ -78,10 +78,6 @@ def main() -> None:
     y_train = train["label"].to_numpy()
     y_test = test["label"].to_numpy()
 
-    print(f"Features: {len(feat_cols)}")
-    for c in feat_cols:
-        print(f"  {c}")
-
     lr = Pipeline(
         [
             ("scaler", StandardScaler()),
@@ -113,10 +109,6 @@ def main() -> None:
     rf_pred = rf.predict(X_test)
     rf_proba = rf.predict_proba(X_test)[:, 1]
     metrics_block("Random Forest (test)", y_test, rf_pred, rf_proba)
-
-    imp = pd.Series(rf.feature_importances_, index=feat_cols).sort_values(ascending=False)
-    print("\n--- Random Forest feature importances (top 15) ---")
-    print(imp.head(15).to_string())
 
 
 if __name__ == "__main__":

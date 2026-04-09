@@ -99,11 +99,6 @@ def main() -> None:
 
     cols = demographic_feature_columns(train)
     used = [c for c in cols if c in BASELINE_WEIGHTS and BASELINE_WEIGHTS[c] != 0]
-    missing_w = [c for c in cols if c not in BASELINE_WEIGHTS]
-    if missing_w:
-        print("Note: numeric columns without explicit baseline weights (excluded from score):")
-        for c in sorted(missing_w):
-            print(f"  - {c}")
 
     mu, sigma = fit_zscore(train, used)
     z_train = zscore_matrix(train, used, mu, sigma)
@@ -118,10 +113,6 @@ def main() -> None:
 
     y_train = train["label"].to_numpy()
     y_test = test["label"].to_numpy()
-
-    print("\nBaseline demographic features used (with non-zero weights):")
-    for c in used:
-        print(f"  {c:28s}  weight={BASELINE_WEIGHTS[c]:+.2f}")
 
     print(f"\nScore threshold (train {TOP_QUANTILE:.0%} quantile): {thresh:.4f}")
     print("\n--- Train (calibration) ---")
