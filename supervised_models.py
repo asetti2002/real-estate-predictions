@@ -21,6 +21,8 @@ from sklearn.preprocessing import StandardScaler
 
 DEFAULT_TRAIN = os.path.join("data", "output", "train.csv")
 DEFAULT_TEST = os.path.join("data", "output", "test.csv")
+# RF/LR settings are reasonable defaults; use GridSearchCV or similar if you need
+# values fit to this dataset (see validate_models.py for CV metrics).
 
 ID_GEO_DROP = {
     "RegionName",
@@ -46,21 +48,65 @@ def ml_feature_columns(df: pd.DataFrame) -> list[str]:
 
 def metrics_block(name: str, y_true: np.ndarray, y_pred: np.ndarray, y_proba: np.ndarray | None) -> None:
     print(f"\n--- {name} ---")
+    m = binary_metrics_dict(y_true, y_pred, y_proba)
     print(
-        f"accuracy={accuracy_score(y_true, y_pred):.4f}  "
-        f"precision={precision_score(y_true, y_pred, zero_division=0):.4f}  "
-        f"recall={recall_score(y_true, y_pred, zero_division=0):.4f}  "
-        f"f1={f1_score(y_true, y_pred, zero_division=0):.4f}"
+        f"accuracy={m['accuracy']:.4f}  "
+        f"precision={m['precision']:.4f}  "
+        f"recall={m['recall']:.4f}  "
+        f"f1={m['f1']:.4f}"
     )
-    if y_proba is not None and len(np.unique(y_true)) > 1:
-        try:
-            print(f"roc_auc={roc_auc_score(y_true, y_proba):.4f}")
-        except ValueError:
-            pass
+    if m["roc_auc"] is not None:
+        print(f"roc_auc={m['roc_auc']:.4f}")
     print("confusion_matrix [ [TN FP] [FN TP] ]:")
     print(confusion_matrix(y_true, y_pred))
     print("classification_report:")
     print(classification_report(y_true, y_pred, digits=4))
+
+
+def binary_metrics_dict(
+    y_true: np.ndarray, y_pred: np.ndarray, y_proba: np.ndarray | None = None
+) -> dict[str, float | None]:
+    out: dict[str, float | None] = {
+        "accuracy": float(accuracy_score(y_true, y_pred)),
+        "precision": float(precision_score(y_true, y_pred, zero_division=0)),
+        "recall": float(recall_score(y_true, y_pred, zero_division=0)),
+        "f1": float(f1_score(y_true, y_pred, zero_division=0)),
+        "roc_auc": None,
+    }
+    if y_proba is not None and len(np.unique(y_true)) > 1:
+        try:
+            out["roc_auc"] = float(roc_auc_score(y_true, y_proba))
+        except ValueError:
+            pass
+    return out
+
+
+def make_logistic_regression() -> Pipeline:
+    return Pipeline(
+        [
+            ("scaler", StandardScaler()),
+            (
+                "clf",
+                LogisticRegression(
+                    max_iter=2000,
+                    class_weight="balanced",
+                    random_state=42,
+                    solver="lbfgs",
+                ),
+            ),
+        ]
+    )
+
+
+def make_random_forest(*, n_jobs: int = -1) -> RandomForestClassifier:
+    return RandomForestClassifier(
+        n_estimators=300,
+        max_depth=12,
+        min_samples_leaf=20,
+        class_weight="balanced",
+        random_state=42,
+        n_jobs=n_jobs,
+    )
 
 
 def main() -> None:
@@ -78,33 +124,13 @@ def main() -> None:
     y_train = train["label"].to_numpy()
     y_test = test["label"].to_numpy()
 
-    lr = Pipeline(
-        [
-            ("scaler", StandardScaler()),
-            (
-                "clf",
-                LogisticRegression(
-                    max_iter=2000,
-                    class_weight="balanced",
-                    random_state=42,
-                    solver="lbfgs",
-                ),
-            ),
-        ]
-    )
+    lr = make_logistic_regression()
     lr.fit(X_train, y_train)
     lr_pred = lr.predict(X_test)
     lr_proba = lr.predict_proba(X_test)[:, 1]
     metrics_block("Logistic Regression (test)", y_test, lr_pred, lr_proba)
 
-    rf = RandomForestClassifier(
-        n_estimators=300,
-        max_depth=12,
-        min_samples_leaf=20,
-        class_weight="balanced",
-        random_state=42,
-        n_jobs=-1,
-    )
+    rf = make_random_forest()
     rf.fit(X_train, y_train)
     rf_pred = rf.predict(X_test)
     rf_proba = rf.predict_proba(X_test)[:, 1]
