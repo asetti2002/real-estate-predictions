@@ -7,8 +7,6 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
-    classification_report,
-    confusion_matrix,
     f1_score,
     precision_score,
     recall_score,
@@ -192,34 +190,9 @@ def main() -> None:
     s_test = baseline_score(z_test, used)
 
     thresh = float(np.quantile(s_train, TOP_QUANTILE))
-    pred_train = (s_train >= thresh).astype(int)
     pred_test = (s_test >= thresh).astype(int)
 
-    y_train = train["label"].to_numpy()
     y_test = test["label"].to_numpy()
-
-    print(f"\nScore threshold (train {TOP_QUANTILE:.0%} quantile): {thresh:.4f}")
-    print("\n--- Train (calibration) ---")
-    print(
-        f"accuracy={accuracy_score(y_train, pred_train):.4f}  "
-        f"precision={precision_score(y_train, pred_train, zero_division=0):.4f}  "
-        f"recall={recall_score(y_train, pred_train, zero_division=0):.4f}  "
-        f"f1={f1_score(y_train, pred_train, zero_division=0):.4f}"
-    )
-    print("confusion_matrix [ [TN FP] [FN TP] ]:")
-    print(confusion_matrix(y_train, pred_train))
-
-    print("\n--- Test ---")
-    print(
-        f"accuracy={accuracy_score(y_test, pred_test):.4f}  "
-        f"precision={precision_score(y_test, pred_test, zero_division=0):.4f}  "
-        f"recall={recall_score(y_test, pred_test, zero_division=0):.4f}  "
-        f"f1={f1_score(y_test, pred_test, zero_division=0):.4f}"
-    )
-    print("confusion_matrix [ [TN FP] [FN TP] ]:")
-    print(confusion_matrix(y_test, pred_test))
-    print("\nclassification_report (test):")
-    print(classification_report(y_test, pred_test, digits=4))
 
     if args.save_preds:
         out = test[
@@ -230,7 +203,6 @@ def main() -> None:
         out["label"] = y_test
         os.makedirs(os.path.dirname(args.save_preds) or ".", exist_ok=True)
         out.to_csv(args.save_preds, index=False)
-        print(f"\nWrote: {args.save_preds}")
 
 
 if __name__ == "__main__":

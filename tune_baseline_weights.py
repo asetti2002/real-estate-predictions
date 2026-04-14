@@ -78,11 +78,6 @@ def main() -> None:
     y = train["label"].to_numpy()
     used = baseline_used_columns(train, BASELINE_WEIGHTS)
 
-    print(f"Rows: {len(train):,}  pos_rate: {y.mean():.3f}")
-    print(f"Features ({len(used)}): {used}")
-    print(f"Grid: |scales|={len(scales)}  |quantiles|={len(quantiles)}  "
-          f"combos={len(scales) ** 2 * len(quantiles)}  cv_folds={args.cv_folds}")
-
     best: dict[str, float | dict[str, float]] | None = None
 
     for tq in quantiles:
@@ -116,20 +111,8 @@ def main() -> None:
 
     assert best is not None
 
-    print("\n=== Best (by mean CV F1) ===")
-    print(
-        f"  scale_pos={best['scale_pos']}  scale_neg={best['scale_neg']}  "
-        f"top_quantile={best['top_quantile']}"
-    )
-    print(
-        f"  CV F1={best['mean_f1']:.4f}±{best['std_f1']:.4f}  "
-        f"prec={best['mean_precision']:.4f}  rec={best['mean_recall']:.4f}"
-    )
-    print("\n  Tuned BASELINE_WEIGHTS (copy into baseline_scoring.py if you want):")
     w_best = best["weights"]
     assert isinstance(w_best, dict)
-    for k in sorted(w_best.keys()):
-        print(f'    "{k}": {w_best[k]:.6g},')
 
     if args.save_json:
         out = {
@@ -147,7 +130,6 @@ def main() -> None:
         os.makedirs(os.path.dirname(args.save_json) or ".", exist_ok=True)
         with open(args.save_json, "w", encoding="utf-8") as f:
             json.dump(out, f, indent=2)
-        print(f"\nWrote: {args.save_json}")
 
     if args.holdout and os.path.isfile(args.test):
         test = pd.read_csv(args.test, low_memory=False)
@@ -161,20 +143,11 @@ def main() -> None:
         s_te = baseline_score(z_te, used, w)
         thresh = float(np.quantile(s_tr, tq))
         pred = (s_te >= thresh).astype(int)
-
-        print("\n=== Hold-out test (z-score fit on full train) ===")
-        print(
-            f"  acc={accuracy_score(y_te, pred):.4f}  "
-            f"f1={f1_score(y_te, pred, zero_division=0):.4f}  "
-            f"prec={precision_score(y_te, pred, zero_division=0):.4f}  "
-            f"rec={recall_score(y_te, pred, zero_division=0):.4f}"
-        )
-
-    if float(best["top_quantile"]) != TOP_QUANTILE:
-        print(
-            f"\nBest top_quantile ({best['top_quantile']}) != baseline_scoring.TOP_QUANTILE "
-            f"({TOP_QUANTILE}). Update TOP_QUANTILE (or pass it through your CLI) so "
-            f"thresholding matches the tuned value."
+        _ = (
+            accuracy_score(y_te, pred),
+            f1_score(y_te, pred, zero_division=0),
+            precision_score(y_te, pred, zero_division=0),
+            recall_score(y_te, pred, zero_division=0),
         )
 
 

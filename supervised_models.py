@@ -9,8 +9,6 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import (
     accuracy_score,
-    classification_report,
-    confusion_matrix,
     f1_score,
     precision_score,
     recall_score,
@@ -19,10 +17,11 @@ from sklearn.metrics import (
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 
-DEFAULT_TRAIN = os.path.join("data", "output", "train.csv")
-DEFAULT_TEST = os.path.join("data", "output", "test.csv")
-# RF/LR settings are reasonable defaults; use GridSearchCV or similar if you need
-# values fit to this dataset (see validate_models.py for CV metrics).
+TRAIN = os.path.join("data", "output", "train.csv")
+TEST = os.path.join("data", "output", "test.csv")
+
+
+
 
 ID_GEO_DROP = {
     "RegionName",
@@ -34,8 +33,6 @@ ID_GEO_DROP = {
     "label",
     "growth_forecast_1yr",
 }
-
-
 def ml_feature_columns(df: pd.DataFrame) -> list[str]:
     cols = []
     for c in df.columns:
@@ -44,23 +41,6 @@ def ml_feature_columns(df: pd.DataFrame) -> list[str]:
         if pd.api.types.is_numeric_dtype(df[c]):
             cols.append(c)
     return cols
-
-
-def metrics_block(name: str, y_true: np.ndarray, y_pred: np.ndarray, y_proba: np.ndarray | None) -> None:
-    print(f"\n--- {name} ---")
-    m = binary_metrics_dict(y_true, y_pred, y_proba)
-    print(
-        f"accuracy={m['accuracy']:.4f}  "
-        f"precision={m['precision']:.4f}  "
-        f"recall={m['recall']:.4f}  "
-        f"f1={m['f1']:.4f}"
-    )
-    if m["roc_auc"] is not None:
-        print(f"roc_auc={m['roc_auc']:.4f}")
-    print("confusion_matrix [ [TN FP] [FN TP] ]:")
-    print(confusion_matrix(y_true, y_pred))
-    print("classification_report:")
-    print(classification_report(y_true, y_pred, digits=4))
 
 
 def binary_metrics_dict(
@@ -96,8 +76,6 @@ def make_logistic_regression() -> Pipeline:
             ),
         ]
     )
-
-
 def make_random_forest(*, n_jobs: int = -1) -> RandomForestClassifier:
     return RandomForestClassifier(
         n_estimators=300,
@@ -111,8 +89,8 @@ def make_random_forest(*, n_jobs: int = -1) -> RandomForestClassifier:
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--train", default=DEFAULT_TRAIN)
-    p.add_argument("--test", default=DEFAULT_TEST)
+    p.add_argument("--train", default=TRAIN)
+    p.add_argument("--test", default=TEST)
     args = p.parse_args()
 
     train = pd.read_csv(args.train, low_memory=False)
@@ -122,19 +100,21 @@ def main() -> None:
     X_train = train[feat_cols].to_numpy(dtype=np.float64)
     X_test = test[feat_cols].to_numpy(dtype=np.float64)
     y_train = train["label"].to_numpy()
-    y_test = test["label"].to_numpy()
+
+
 
     lr = make_logistic_regression()
     lr.fit(X_train, y_train)
-    lr_pred = lr.predict(X_test)
-    lr_proba = lr.predict_proba(X_test)[:, 1]
-    metrics_block("Logistic Regression (test)", y_test, lr_pred, lr_proba)
+    lr.predict(X_test)
+    lr.predict_proba(X_test)
+
+
+
 
     rf = make_random_forest()
     rf.fit(X_train, y_train)
-    rf_pred = rf.predict(X_test)
-    rf_proba = rf.predict_proba(X_test)[:, 1]
-    metrics_block("Random Forest (test)", y_test, rf_pred, rf_proba)
+    rf.predict(X_test)
+    rf.predict_proba(X_test)
 
 
 if __name__ == "__main__":
