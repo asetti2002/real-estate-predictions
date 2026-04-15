@@ -28,10 +28,12 @@ We use two sources:
 │   └── output/                 <- generated csvs (features, train, test)
 ├── __init__.py                 <- marks repo as a Python package
 ├── data_pipeline.py            <- fetches census, cleans everything, builds features, outputs train/test
-├── baseline_scoring.py         <- weighted demographic index baseline
+├── baseline_scoring.py         <- weighted demographic index baseline with CV support
 ├── supervised_models.py        <- logistic regression + random forest
+├── tune_baseline_weights.py    <- grid search over baseline weight scales and threshold
+├── validate_models.py          <- cross-validation against dummy baselines, sanity checks
 ├── pre_process_data.ipynb      <- earlier notebook (data_pipeline.py supersedes this)
-├── test_pipeline.py            <- unit tests
+├── requirements.txt
 └── README.md
 ```
 
@@ -40,7 +42,7 @@ We use two sources:
 Python 3.10+
 
 ```
-pip install pandas numpy scikit-learn requests
+pip install -r requirements.txt
 ```
 
 You also need a Census API key. Get one at https://api.census.gov/data/key_signup.html and put it in `data_pipeline.py` where it says `CENSUS_API_KEY`.
@@ -72,7 +74,19 @@ And the supervised models:
 python supervised_models.py
 ```
 
-Both scripts read from `data/output/` by default. You can pass `--train` and `--test` flags if your files are somewhere else.
+To tune the baseline weights via grid search:
+
+```
+python tune_baseline_weights.py
+```
+
+To cross-validate everything and compare against dummy classifiers:
+
+```
+python validate_models.py
+```
+
+All scripts read from `data/output/` by default. You can pass `--train` and `--test` flags if your files are somewhere else.
 
 ## Features
 
@@ -90,7 +104,7 @@ Census features cover demographics and economics: population, median age, income
 | Logistic Regression       | 0.760    | 0.538     | 0.797  | 0.643 | 0.847 |
 | Random Forest             | 0.796    | 0.597     | 0.755  | 0.667 | 0.872 |
 
-The baseline z-score normalizes Census features and computes a weighted sum — positive weights for income, education, young population, negative for vacancy and elderly population. It then uses the 75th percentile as a cutoff. It's basically useless. Both ML models significantly outperform it, with Random Forest doing slightly better across the board.
+The baseline z-score normalizes Census features and computes a weighted sum; positive weights for income, education, young population, negative for vacancy and elderly population. It then uses the 75th percentile as a cutoff. It's basically useless. Both ML models significantly outperform it, with Random Forest doing slightly better across the board.
 
 ## Notes
 
