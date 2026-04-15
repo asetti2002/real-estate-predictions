@@ -72,8 +72,8 @@ CENSUS_NUMERIC = [
 BASE_URL = "https://api.census.gov/data"
 
 
-def section(title):
-    print(f"\n{'='*70}\n  {title}\n{'='*70}")
+def section(title: str) -> None:
+    return
 
 
 # Fetch ACS data
@@ -86,7 +86,6 @@ def fetch_table(table, year, vars_dict):
            f"&key={CENSUS_API_KEY}")
     resp = requests.get(url, timeout=30)
     if resp.status_code != 200:
-        print(f"  [WARN] HTTP {resp.status_code} for {table} {year}, skipping")
         return None
     data = resp.json()
     df = pd.DataFrame(data[1:], columns=data[0])
@@ -98,17 +97,12 @@ def fetch_table(table, year, vars_dict):
 def pull_census():
     all_dfs = []
     for yr in CENSUS_YEARS:
-        print(f"\n  Pulling {yr}...")
         yr_dfs = []
         for tbl, vars_dict in TABLES.items():
-            print(f"    {tbl}...", end=" ", flush=True)
             df = fetch_table(tbl, yr, vars_dict)
             if df is not None:
                 keep = ["zip", "year"] + list(vars_dict.values())
                 yr_dfs.append(df[keep])
-                print("OK")
-            else:
-                print("FAILED")
             time.sleep(0.5)
         if yr_dfs:
             merged = yr_dfs[0]
@@ -120,7 +114,6 @@ def pull_census():
 
 section("STEP 1 — Fetch ACS Census data (takes ~2 min)")
 census_raw = pull_census()
-print(f"\nCensus raw: {census_raw.shape[0]:,} rows x {census_raw.shape[1]} cols")
 
 
 # Clean census
@@ -173,17 +166,11 @@ census_latest.drop(columns=["year"], inplace=True)
 drop_cols = [c for c in ["pop_65_plus", "pop_18_to_34"] if c in census_latest.columns]
 census_latest.drop(columns=drop_cols, inplace=True)
 
-print(f"Cleaned: {census_clean.shape[0]:,} rows x {census_clean.shape[1]} cols")
-print(f"Using year {latest_yr} ({len(census_latest):,} ZIPs)")
-print(f"Columns: {[c for c in census_latest.columns if c != 'zip']}")
-
-
 # Load ZHVI
 
 section("STEP 3 — Load and clean ZHVI")
 
 zhvi_raw = pd.read_csv(ZHVI_PATH, low_memory=False)
-print(f"ZHVI raw: {zhvi_raw.shape[0]:,} rows x {zhvi_raw.shape[1]} cols")
 
 meta_cols = [c for c in zhvi_raw.columns if not c.startswith("20")]
 date_cols = [c for c in zhvi_raw.columns if c.startswith("20")]
@@ -196,10 +183,6 @@ zhvi_long["date"] = pd.to_datetime(zhvi_long["date"])
 zhvi_long.dropna(subset=["zhvi"], inplace=True)
 zhvi_long.sort_values(["RegionName", "date"], inplace=True)
 zhvi_long.reset_index(drop=True, inplace=True)
-
-print(f"ZHVI long: {zhvi_long.shape[0]:,} rows x {zhvi_long.shape[1]} cols")
-print(f"Dates: {zhvi_long['date'].min().date()} to {zhvi_long['date'].max().date()}")
-print(f"ZIPs: {zhvi_long['RegionName'].nunique():,}")
 
 
 # ZHVI features
@@ -253,11 +236,6 @@ geo_meta = (zhvi_long[["RegionName", "State", "City", "Metro", "CountyName", "St
 zhvi_feats = pd.concat([current, r3, r12, r36, r60, accel, vol, vs_metro, geo_meta],
                        axis=1).reset_index()
 
-print(f"ZHVI features: {zhvi_feats.shape[0]:,} x {zhvi_feats.shape[1]}")
-feat_names = [c for c in zhvi_feats.columns
-              if c not in ["RegionName", "State", "City", "Metro", "CountyName", "StateName"]]
-print(f"Features: {feat_names}")
-
 
 # ZHVF label
 
@@ -274,11 +252,6 @@ zhvf_label = zhvf[["RegionName", LABEL_FORECAST_COL]].rename(
     columns={LABEL_FORECAST_COL: "growth_forecast_1yr"})
 zhvf_label.dropna(subset=["growth_forecast_1yr"], inplace=True)
 
-print(f"ZHVF loaded: {zhvf.shape[0]:,} rows")
-print(f"Valid forecasts: {len(zhvf_label):,}")
-print(f"\nGrowth stats (%):")
-print(zhvf_label["growth_forecast_1yr"].describe().round(4).to_string())
-
 
 # Merge everything
 
@@ -288,13 +261,9 @@ section("STEP 6 — Build master panel")
 panel = zhvi_feats.merge(census_latest, left_on="RegionName", right_on="zip",
                          how="left")
 panel.drop(columns=["zip"], errors="ignore", inplace=True)
-print(f"After ZHVI + Census: {panel.shape[0]:,} x {panel.shape[1]}")
 
 # add forecast label (inner join — only keep zips with valid forecast)
-n_before = len(panel)
 panel = panel.merge(zhvf_label, on="RegionName", how="inner")
-print(f"After + ZHVF label: {panel.shape[0]:,} rows  "
-      f"(dropped {n_before - len(panel):,} with no forecast)")
 
 
 #  Validate features
@@ -314,23 +283,14 @@ for col in ["forecast_growth", "year"]:
 feature_cols = [c for c in panel.columns
                 if c not in skip and pd.api.types.is_numeric_dtype(panel[c])]
 
-print(f"\nFeatures ({len(feature_cols)}):")
-for f in feature_cols:
-    print(f"  {f}")
-
 # inf → NaN → median fill
 panel[feature_cols] = panel[feature_cols].replace([np.inf, -np.inf], np.nan)
 missing = panel[feature_cols].isnull().sum()
 missing = missing[missing > 0].sort_values(ascending=False)
 
 if len(missing):
-    print(f"\nFilling missing values with median:")
-    print(missing.to_string())
     for c in missing.index:
         panel[c] = panel[c].fillna(panel[c].median())
-    print("  Done.")
-else:
-    print("\nNo missing values.")
 
 
 # Save features
@@ -344,9 +304,6 @@ features_df = panel[out_cols].copy()
 feat_path = os.path.join(OUTPUT_DIR, "features.csv")
 features_df.to_csv(feat_path, index=False)
 
-print(f"Saved: {feat_path}")
-print(f"Shape: {features_df.shape[0]:,} x {features_df.shape[1]}")
-
 
 # Binary label
 
@@ -354,12 +311,6 @@ section("STEP 9 — Binary label (top 25%)")
 
 threshold = panel["growth_forecast_1yr"].quantile(TOP_QUANTILE)
 panel["label"] = (panel["growth_forecast_1yr"] >= threshold).astype(int)
-
-counts = panel["label"].value_counts().sort_index()
-pcts = (counts / len(panel) * 100).round(1)
-print(f"Threshold: {threshold:.4f}%")
-print(f"label=0: {counts[0]:,} ({pcts[0]}%)")
-print(f"label=1: {counts[1]:,} ({pcts[1]}%)")
 
 
 # Train/test split
@@ -375,11 +326,6 @@ train_df, test_df = train_test_split(ml_panel, test_size=TEST_SIZE,
 train_df = train_df.reset_index(drop=True)
 test_df = test_df.reset_index(drop=True)
 
-print(f"Train: {len(train_df):,} rows  "
-      f"(label=1: {train_df['label'].sum():,} = {train_df['label'].mean()*100:.1f}%)")
-print(f"Test:  {len(test_df):,} rows  "
-      f"(label=1: {test_df['label'].sum():,} = {test_df['label'].mean()*100:.1f}%)")
-
 
 # Save splits
 
@@ -390,40 +336,6 @@ test_path = os.path.join(OUTPUT_DIR, "test.csv")
 train_df.to_csv(train_path, index=False)
 test_df.to_csv(test_path, index=False)
 
-print(f"train.csv: {len(train_df):,} x {train_df.shape[1]} → {train_path}")
-print(f"test.csv:  {len(test_df):,} x {test_df.shape[1]} → {test_path}")
-
-
-# Summary
-
 section("STEP 12 — Summary")
-
-zhvi_feat_names = ["current_zhvi", "return_3m", "return_12m", "return_36m",
-                   "return_60m", "acceleration", "volatility_12m", "vs_metro"]
-census_feat_names = [c for c in feature_cols if c not in zhvi_feat_names]
-
-print(f"""
-OUTPUTS
--------
-  features.csv : {feat_path}  ({features_df.shape[0]:,} x {features_df.shape[1]})
-  train.csv    : {train_path}  ({len(train_df):,} rows, {train_df['label'].mean()*100:.1f}% positive)
-  test.csv     : {test_path}  ({len(test_df):,} rows, {test_df['label'].mean()*100:.1f}% positive)
-
-ZHVI features ({len(zhvi_feat_names)}):""")
-
-for f in zhvi_feat_names:
-    if f in panel.columns:
-        print(f"  {f:<28s}  min={panel[f].min():>12.3f}  max={panel[f].max():>12.3f}")
-
-print(f"\nCensus features ({len(census_feat_names)}):")
-for f in census_feat_names:
-    if f in panel.columns:
-        print(f"  {f:<28s}  min={panel[f].min():>12.3f}  max={panel[f].max():>12.3f}")
-
-print(f"""
-Label: growth_forecast_1yr >= {threshold:.4f}% (75th pctile)
-       {pcts[1]}% positive / {pcts[0]}% negative
-
-""")
 
 section("DONE")

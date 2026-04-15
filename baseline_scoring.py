@@ -7,12 +7,11 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import (
     accuracy_score,
-    classification_report,
-    confusion_matrix,
     f1_score,
     precision_score,
     recall_score,
 )
+from sklearn.model_selection import StratifiedKFold
 
 ZHVI_DERIVED = {
     "current_zhvi",
@@ -26,7 +25,8 @@ ZHVI_DERIVED = {
 }
 
 
-# might do a grid search to find the best weights
+# Domain-informed directions/magnitudes. Tune scales + threshold with
+# `python tune_baseline_weights.py`; validate with `python validate_models.py`.
 BASELINE_WEIGHTS: dict[str, float] = {
     "median_household_income": 1.0,
     "employment_rate": 1.0,
@@ -75,11 +75,94 @@ def zscore_matrix(df: pd.DataFrame, cols: list[str], mu: np.ndarray, sigma: np.n
     return (x - mu) / sigma
 
 
-def baseline_score(z: np.ndarray, cols: list[str]) -> np.ndarray:
-    w = np.array([BASELINE_WEIGHTS.get(c, 0.0) for c in cols], dtype=np.float64)
+def baseline_score(
+    z: np.ndarray, cols: list[str], weights: dict[str, float] | None = None
+) -> np.ndarray:
+    wmap = BASELINE_WEIGHTS if weights is None else weights
+    w = np.array([wmap.get(c, 0.0) for c in cols], dtype=np.float64)
     if np.all(w == 0):
         raise ValueError("No overlapping weights for selected demographic columns.")
     return z @ w
+
+
+def signed_unit_weights(cols: list[str], reference: dict[str, float]) -> dict[str, float]:
+    """±1 weights matching the sign of `reference` for each column (for ablations / CV)."""
+    out: dict[str, float] = {}
+    for c in cols:
+        v = float(reference.get(c, 1.0))
+        if v > 0:
+            out[c] = 1.0
+        elif v < 0:
+            out[c] = -1.0
+        else:
+            out[c] = 1.0
+    return out
+
+
+def baseline_used_columns(df: pd.DataFrame, reference: dict[str, float] | None = None) -> list[str]:
+    """Ordered demographic columns that appear in `reference` with non-zero weight."""
+    ref = BASELINE_WEIGHTS if reference is None else reference
+    cols = demographic_feature_columns(df)
+    return [c for c in cols if c in ref and ref[c] != 0]
+
+
+def scaled_pair_weights(
+    used: list[str],
+    reference: dict[str, float],
+    scale_pos: float,
+    scale_neg: float,
+) -> dict[str, float]:
+    """
+    Scale positive-reference weights by `scale_pos` and negative ones by `scale_neg`
+    (reference values are already signed; this scales magnitude per sign group).
+    """
+    out: dict[str, float] = {}
+    for c in used:
+        v = float(reference[c])
+        if v > 0:
+            out[c] = v * scale_pos
+        elif v < 0:
+            out[c] = v * scale_neg
+        else:
+            out[c] = 0.0
+    return out
+
+
+def baseline_cv_scores(
+    df: pd.DataFrame,
+    y: np.ndarray,
+    *,
+    n_splits: int,
+    weights: dict[str, float] | None,
+    random_state: int,
+    reference: dict[str, float] | None = None,
+    top_quantile: float | None = None,
+) -> dict[str, np.ndarray]:
+    """Stratified CV: z-score and score threshold fit inside each train fold only."""
+    tq = TOP_QUANTILE if top_quantile is None else float(top_quantile)
+    used = baseline_used_columns(df, reference)
+    skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=random_state)
+    acc, f1, prec, rec = [], [], [], []
+    for tr_idx, va_idx in skf.split(np.zeros(len(y)), y):
+        tr, va = df.iloc[tr_idx], df.iloc[va_idx]
+        mu, sigma = fit_zscore(tr, used)
+        z_tr = zscore_matrix(tr, used, mu, sigma)
+        z_va = zscore_matrix(va, used, mu, sigma)
+        s_tr = baseline_score(z_tr, used, weights)
+        s_va = baseline_score(z_va, used, weights)
+        thresh = float(np.quantile(s_tr, tq))
+        pred_va = (s_va >= thresh).astype(int)
+        y_va = y[va_idx]
+        acc.append(float(accuracy_score(y_va, pred_va)))
+        f1.append(float(f1_score(y_va, pred_va, zero_division=0)))
+        prec.append(float(precision_score(y_va, pred_va, zero_division=0)))
+        rec.append(float(recall_score(y_va, pred_va, zero_division=0)))
+    return {
+        "accuracy": np.asarray(acc, dtype=np.float64),
+        "f1": np.asarray(f1, dtype=np.float64),
+        "precision": np.asarray(prec, dtype=np.float64),
+        "recall": np.asarray(rec, dtype=np.float64),
+    }
 
 
 def main() -> None:
@@ -97,8 +180,7 @@ def main() -> None:
     train = pd.read_csv(args.train, low_memory=False)
     test = pd.read_csv(args.test, low_memory=False)
 
-    cols = demographic_feature_columns(train)
-    used = [c for c in cols if c in BASELINE_WEIGHTS and BASELINE_WEIGHTS[c] != 0]
+    used = baseline_used_columns(train)
 
     mu, sigma = fit_zscore(train, used)
     z_train = zscore_matrix(train, used, mu, sigma)
@@ -108,34 +190,9 @@ def main() -> None:
     s_test = baseline_score(z_test, used)
 
     thresh = float(np.quantile(s_train, TOP_QUANTILE))
-    pred_train = (s_train >= thresh).astype(int)
     pred_test = (s_test >= thresh).astype(int)
 
-    y_train = train["label"].to_numpy()
     y_test = test["label"].to_numpy()
-
-    print(f"\nScore threshold (train {TOP_QUANTILE:.0%} quantile): {thresh:.4f}")
-    print("\n--- Train (calibration) ---")
-    print(
-        f"accuracy={accuracy_score(y_train, pred_train):.4f}  "
-        f"precision={precision_score(y_train, pred_train, zero_division=0):.4f}  "
-        f"recall={recall_score(y_train, pred_train, zero_division=0):.4f}  "
-        f"f1={f1_score(y_train, pred_train, zero_division=0):.4f}"
-    )
-    print("confusion_matrix [ [TN FP] [FN TP] ]:")
-    print(confusion_matrix(y_train, pred_train))
-
-    print("\n--- Test ---")
-    print(
-        f"accuracy={accuracy_score(y_test, pred_test):.4f}  "
-        f"precision={precision_score(y_test, pred_test, zero_division=0):.4f}  "
-        f"recall={recall_score(y_test, pred_test, zero_division=0):.4f}  "
-        f"f1={f1_score(y_test, pred_test, zero_division=0):.4f}"
-    )
-    print("confusion_matrix [ [TN FP] [FN TP] ]:")
-    print(confusion_matrix(y_test, pred_test))
-    print("\nclassification_report (test):")
-    print(classification_report(y_test, pred_test, digits=4))
 
     if args.save_preds:
         out = test[
@@ -146,7 +203,6 @@ def main() -> None:
         out["label"] = y_test
         os.makedirs(os.path.dirname(args.save_preds) or ".", exist_ok=True)
         out.to_csv(args.save_preds, index=False)
-        print(f"\nWrote: {args.save_preds}")
 
 
 if __name__ == "__main__":
